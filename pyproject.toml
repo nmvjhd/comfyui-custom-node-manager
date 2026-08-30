@@ -1,0 +1,9 @@
+[project]
+name = "comfyui-custom-node-manager"
+version = "1.0.0"
+description = "Update Git and Comfy Registry custom nodes from inside ComfyUI"
+requires-python = ">=3.11"
+
+[tool.comfy]
+PublisherId = "local"
+DisplayName = "ComfyUI Custom Node Manager"
