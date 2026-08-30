@@ -27,6 +27,20 @@
 - 从 GitHub、任意 Git 地址或 Comfy Registry 搜索并安装插件。
 - 支持禁用、启用、重新安装和卸载插件，并可直接重启 ComfyUI。
 
+## 界面预览
+
+### 软件主界面
+
+![插件管理器主界面](./assets/screenshots/main-interface.png)
+
+### 插件安装界面
+
+![插件安装界面](./assets/screenshots/plugin-install.png)
+
+### 最近提交界面
+
+![最近提交界面](./assets/screenshots/recent-commits.png)
+
 ## 安装
 
 在 ComfyUI 的 `custom_nodes` 目录中执行：

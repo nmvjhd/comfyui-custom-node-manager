@@ -27,6 +27,20 @@ This project therefore treats Git repositories as the primary source while retai
 - Searches and installs plugins from GitHub, any Git URL, or Comfy Registry.
 - Supports disabling, enabling, reinstalling, and uninstalling plugins, as well as restarting ComfyUI directly.
 
+## Interface Preview
+
+### Main Interface
+
+![Plugin manager main interface](./assets/screenshots/main-interface.png)
+
+### Plugin Installation
+
+![Plugin installation interface](./assets/screenshots/plugin-install.png)
+
+### Recent Commits
+
+![Recent commits interface](./assets/screenshots/recent-commits.png)
+
 ## Installation
 
 Run the following command inside ComfyUI's `custom_nodes` directory:
