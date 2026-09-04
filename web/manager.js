@@ -951,10 +951,12 @@ function ensureHistoryDialog() {
     const header = el("header", "cnm-history-header");
     const heading = el("div", "cnm-history-heading");
     heading.append(el("span", "", t("最近提交")), el("h3", "", t("最近提交")));
+    const actions = el("div", "cnm-header-actions");
     state.historyActions = el("div", "cnm-header-actions");
     const close = button("×", closeHistory, "icon");
     close.setAttribute("aria-label", t("关闭提交记录"));
-    header.append(heading, state.historyActions, close);
+    actions.append(state.historyActions, close);
+    header.append(heading, actions);
     state.historyContent = el("main", "cnm-history-content");
     dialog.append(header, state.historyContent);
     overlay.append(dialog);
