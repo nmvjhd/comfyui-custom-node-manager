@@ -280,7 +280,7 @@ function setLang(lang) {
 
 const typeLabels = { git: "Git 仓库", registry: "官方市场", unmanaged: "未识别来源", self: "管理器", error: "错误" };
 const jobKindLabels = { update: "更新", install: "安装" };
-const state = { plugins: Array.isArray(cachedPlugins) ? cachedPlugins : [], loading: false, scanProgress: null, remoteRevision: 0, query: "", statusFilter: "all", sort: "name", centerTab: "settings", activeJobs: new Map(), pendingActions: new Set(), needsRestart: sessionStorage.getItem(RESTART_KEY) === "1", restarting: false, lastScan: null, githubToken: false, dialog: null, content: null, progressHost: null, headerActions: null, historyDialog: null, historyContent: null, installTab: "github", github: { query: "", results: [], total: 0, loading: false, error: "", requestId: 0, page: 1, search: "", searched: false, appendComfyui: true }, registry: { query: "", results: [], total: 0, loading: false, error: "", requestId: 0, page: 1, searched: false }, githubContent: null, githubOpen: false, selected: new Set(), diskUsage: {}, diskUsageTotal: 0, diskUsageLoading: false, dependencyConflicts: null, dependencyConflictsLoading: false };
+const state = { plugins: Array.isArray(cachedPlugins) ? cachedPlugins : [], loading: false, scanProgress: null, remoteRevision: 0, query: "", statusFilter: "all", sort: "name", centerTab: "settings", activeJobs: new Map(), pendingActions: new Set(), needsRestart: sessionStorage.getItem(RESTART_KEY) === "1", restarting: false, lastScan: null, githubToken: false, dialog: null, content: null, progressHost: null, headerActions: null, historyDialog: null, historyContent: null, historyActions: null, installTab: "github", github: { query: "", results: [], total: 0, loading: false, error: "", requestId: 0, page: 1, search: "", searched: false, appendComfyui: true }, registry: { query: "", results: [], total: 0, loading: false, error: "", requestId: 0, page: 1, searched: false }, githubContent: null, githubOpen: false, selected: new Set(), diskUsage: {}, diskUsageTotal: 0, diskUsageLoading: false, dependencyConflicts: null, dependencyConflictsLoading: false };
 
 function setNeedsRestart(value) {
     state.needsRestart = Boolean(value);
@@ -951,9 +951,10 @@ function ensureHistoryDialog() {
     const header = el("header", "cnm-history-header");
     const heading = el("div", "cnm-history-heading");
     heading.append(el("span", "", t("最近提交")), el("h3", "", t("最近提交")));
+    state.historyActions = el("div", "cnm-header-actions");
     const close = button("×", closeHistory, "icon");
     close.setAttribute("aria-label", t("关闭提交记录"));
-    header.append(heading, close);
+    header.append(heading, state.historyActions, close);
     state.historyContent = el("main", "cnm-history-content");
     dialog.append(header, state.historyContent);
     overlay.append(dialog);
@@ -965,6 +966,7 @@ function ensureHistoryDialog() {
 async function openHistory(name) {
     state.githubOpen = false;
     ensureHistoryDialog();
+    state.historyActions.replaceChildren();
     state.historyContent.replaceChildren(el("div", "cnm-empty", t("正在读取最近提交…")));
     state.historyDialog.classList.add("open");
     try {
@@ -1081,12 +1083,20 @@ function renderLocalDiff(result) {
 async function openLocalDiff(name) {
     state.githubOpen = false;
     ensureHistoryDialog();
+    state.historyActions.replaceChildren();
     state.historyContent.replaceChildren(el("div", "cnm-empty", t("正在读取本地修改…")));
     state.historyDialog.classList.add("open");
     try {
         const result = await request(`/custom-node-manager/local-diff?name=${encodeURIComponent(name)}`);
         state.historyDialog.querySelector(".cnm-history-heading span").textContent = t("本地修改");
         state.historyDialog.querySelector("h3").textContent = t("{name} · 本地修改", { name: result.name });
+        if (result.files.length) {
+            const pluginBusy = busyPluginNames().has(name);
+            const reset = button(t("还原本地修改"), () => updatePlugins([name]), "danger small");
+            reset.disabled = pluginBusy;
+            reset.title = pluginBusy ? t("正在处理中") : "";
+            state.historyActions.replaceChildren(reset);
+        }
         renderLocalDiff(result);
     } catch (error) {
         state.historyContent.replaceChildren(el("div", "cnm-empty", error.message));
@@ -1096,6 +1106,7 @@ async function openLocalDiff(name) {
 
 function openUtility(title, kicker) {
     ensureHistoryDialog();
+    state.historyActions.replaceChildren();
     state.historyDialog.querySelector(".cnm-history-heading span").textContent = kicker || t("插件操作");
     state.historyDialog.querySelector("h3").textContent = title;
     state.historyContent.replaceChildren(el("div", "cnm-empty", t("正在读取…")));
