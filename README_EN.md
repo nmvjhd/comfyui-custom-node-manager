@@ -26,6 +26,8 @@ This project therefore treats Git repositories as the primary source while retai
 - Opens remote repositories by clicking plugin names and opens local plugin directories with one action.
 - Searches and installs plugins from GitHub, any Git URL, or Comfy Registry.
 - Supports disabling, enabling, reinstalling, and uninstalling plugins, as well as restarting ComfyUI directly.
+- Adapts to ComfyUI's light/dark theme, and offers a Chinese/English UI toggle in the panel header.
+- Flags cross-plugin Python dependency conflicts (incompatible version ranges, or a mismatch with what's actually installed) from the manager center's "Dependency Conflicts" tab.
 
 ## Interface Preview
 

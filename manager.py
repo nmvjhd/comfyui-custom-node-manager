@@ -23,6 +23,13 @@ from aiohttp import web
 from server import PromptServer
 from . import store
 
+try:
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
+    from packaging.version import InvalidVersion, Version
+except ImportError:
+    Requirement = InvalidRequirement = canonicalize_name = Version = InvalidVersion = None
+
 
 logger = logging.getLogger("comfyui_custom_node_manager")
 CUSTOM_NODES = Path(__file__).resolve().parent.parent
@@ -311,6 +318,148 @@ def _pip_install_args(path):
     if deps:
         return deps, "pyproject.toml"
     return [], ""
+
+
+def _requirement_strings(path):
+    """Best-effort per-line requirement extraction, for static analysis only.
+
+    Deliberately simpler than what pip itself accepts (skips pip-only directives like
+    `-r other.txt` or `--index-url`) - good enough for spotting cross-plugin version
+    conflicts, but _pip_install_args (which lets pip parse requirements.txt itself) is
+    still what actually drives real installs.
+    """
+    requirements = path / "requirements.txt"
+    if requirements.is_file():
+        lines = []
+        try:
+            content = requirements.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+        for raw in content.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line or line.startswith("-"):
+                continue
+            lines.append(line)
+        return lines
+    return _pyproject_dependencies(path)
+
+
+_SPEC_BOUND_OPS = {">=", ">", "<=", "<", "=="}
+
+
+def _specifier_bounds(specifier_set):
+    """Collapse a SpecifierSet into (low, high, exact) using only relational operators.
+
+    low/high are (Version, inclusive) tuples or None; exact is a Version or None. This is a
+    heuristic, not a full PEP 440 solver - operators like ~=, !=, and pre-release markers are
+    ignored, which is an acceptable trade-off for a best-effort conflict warning.
+    """
+    low = None
+    high = None
+    exact = None
+    for spec in specifier_set:
+        if spec.operator not in _SPEC_BOUND_OPS:
+            continue
+        try:
+            version = Version(spec.version)
+        except InvalidVersion:
+            continue
+        if spec.operator == "==":
+            exact = version
+        elif spec.operator in (">=", ">"):
+            if low is None or version > low[0]:
+                low = (version, spec.operator == ">=")
+        elif spec.operator in ("<=", "<"):
+            if high is None or version < high[0]:
+                high = (version, spec.operator == "<=")
+    return low, high, exact
+
+
+def _version_within_bounds(version, low, high):
+    if low and (version < low[0] or (version == low[0] and not low[1])):
+        return False
+    if high and (version > high[0] or (version == high[0] and not high[1])):
+        return False
+    return True
+
+
+def _specifiers_disjoint(spec_a, spec_b):
+    low_a, high_a, exact_a = _specifier_bounds(spec_a)
+    low_b, high_b, exact_b = _specifier_bounds(spec_b)
+    if exact_a is not None and exact_b is not None:
+        return exact_a != exact_b
+    if exact_a is not None:
+        return not _version_within_bounds(exact_a, low_b, high_b)
+    if exact_b is not None:
+        return not _version_within_bounds(exact_b, low_a, high_a)
+    if low_a and high_b and (low_a[0] > high_b[0] or (low_a[0] == high_b[0] and not (low_a[1] and high_b[1]))):
+        return True
+    if low_b and high_a and (low_b[0] > high_a[0] or (low_b[0] == high_a[0] and not (low_b[1] and high_a[1]))):
+        return True
+    return False
+
+
+def _dependency_conflicts():
+    """Compare every enabled plugin's declared Python dependencies against each other.
+
+    Flags two kinds of issues: (1) two plugins declaring version ranges for the same package
+    that cannot both be satisfied (e.g. `>=2.0` vs `<1.5`), and (2) a plugin's declared range
+    excluding the version that is actually installed. Both use only relational specifiers
+    (see _specifier_bounds) - this is a heuristic surfaced as a hint, not a guarantee.
+    """
+    if Requirement is None:
+        return []
+    by_package = {}
+    for path in _plugin_paths():
+        if _is_disabled_path(path):
+            continue
+        name = _plugin_name(path)
+        for raw in _requirement_strings(path):
+            try:
+                req = Requirement(raw)
+            except InvalidRequirement:
+                continue
+            try:
+                if req.marker is not None and not req.marker.evaluate():
+                    continue
+            except Exception:
+                pass
+            if not req.specifier:
+                continue
+            canonical = canonicalize_name(req.name)
+            by_package.setdefault(canonical, []).append({"plugin": name, "raw": raw, "specifier": req.specifier})
+
+    conflicts = []
+    for canonical, entries in by_package.items():
+        if len(entries) < 2:
+            continue
+        installed_version_raw = _installed_package_version(canonical)
+        installed_version = None
+        if installed_version_raw:
+            try:
+                installed_version = Version(installed_version_raw)
+            except InvalidVersion:
+                installed_version = None
+        pairwise_conflict = False
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                if _specifiers_disjoint(entries[i]["specifier"], entries[j]["specifier"]):
+                    pairwise_conflict = True
+        unmet_by = []
+        if installed_version is not None:
+            for entry in entries:
+                if not entry["specifier"].contains(installed_version, prereleases=True):
+                    unmet_by.append(entry["plugin"])
+        if pairwise_conflict or unmet_by:
+            conflicts.append({
+                "package": canonical,
+                "installed_version": installed_version_raw or "",
+                "requirements": [{"plugin": entry["plugin"], "requirement": entry["raw"]} for entry in entries],
+                "pairwise_conflict": pairwise_conflict,
+                "unmet_by": unmet_by,
+            })
+    conflicts.sort(key=lambda item: item["package"])
+    return conflicts
 
 
 def _version_key(value):
@@ -1291,6 +1440,22 @@ async def plugin_disk_usage(request):
     elapsed_ms = round((time.monotonic() - started) * 1000)
     _log("info", "disk_usage_completed", trace_id, plugin_count=len(sizes), elapsed_ms=elapsed_ms)
     return web.json_response({"trace_id": trace_id, "sizes": sizes, "total": sum(sizes.values())})
+
+
+@PromptServer.instance.routes.get("/custom-node-manager/dependency-conflicts")
+async def dependency_conflicts(request):
+    # On-demand and separate from /scan or /local for the same reason as /disk-usage: parsing
+    # every enabled plugin's requirements and cross-checking them is only worth doing when a
+    # user actually opens the dependency-conflicts tab, not on every routine scan.
+    trace_id = str(uuid.uuid4())
+    started = time.monotonic()
+    try:
+        conflicts = await asyncio.to_thread(_dependency_conflicts)
+    except Exception as error:
+        logger.exception("%s", json.dumps({"event": "dependency_conflicts_failed", "trace_id": trace_id, "error": str(error)}, ensure_ascii=False))
+        raise web.HTTPInternalServerError(text=str(error))
+    _log("info", "dependency_conflicts_completed", trace_id, conflict_count=len(conflicts), elapsed_ms=round((time.monotonic() - started) * 1000))
+    return web.json_response({"trace_id": trace_id, "conflicts": conflicts, "supported": Requirement is not None})
 
 
 @PromptServer.instance.routes.get("/custom-node-manager/local")
